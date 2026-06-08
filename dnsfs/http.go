@@ -28,7 +28,11 @@ func handleDownload(rw http.ResponseWriter, req *http.Request) {
 			return
 		}
 		chunk++
-		rw.Write(o)
+		_, err := rw.Write(o)
+		if err != nil {
+			AddLog("Download of '%s' aborted by client: %s", filename, err.Error())
+			return
+		}
 	}
 }
 

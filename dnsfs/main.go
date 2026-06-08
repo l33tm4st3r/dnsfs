@@ -63,6 +63,9 @@ func main() {
 func parseIPList(path string) []string {
 	bytes, err := ioutil.ReadFile(path)
 	if err != nil {
+		if *mockMode {
+			return []string{"127.0.0.1"}
+		}
 		log.Fatalf("Unable to read IP list, %s", err.Error())
 	}
 

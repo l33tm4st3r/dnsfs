@@ -2,15 +2,14 @@ package main
 
 import (
 	"crypto/md5"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net"
 	"strconv"
 	"strings"
-
+	"sync"
 	"time"
-
-	"encoding/base64"
 
 	"github.com/miekg/dns"
 )
@@ -26,10 +25,15 @@ type storageRequest struct {
 	replications         int
 }
 
-var uploadPendingMap map[string]storageRequest
+var (
+	uploadPendingMap      map[string]storageRequest
+	uploadPendingMapMutex sync.RWMutex
+)
 
 func DNSLoop(socket net.PacketConn) {
+	uploadPendingMapMutex.Lock()
 	uploadPendingMap = make(map[string]storageRequest)
+	uploadPendingMapMutex.Unlock()
 	for {
 		dnsin := make([]byte, 1500)
 		inbytes, inaddr, err := socket.ReadFrom(dnsin)
@@ -66,15 +70,17 @@ func DNSLoop(socket net.PacketConn) {
 
 		ttl := uint32(2147483646)
 		content := ""
-		if uploadPendingMap[queryname].content == "" {
+		uploadPendingMapMutex.Lock()
+		req, exists := uploadPendingMap[queryname]
+		if !exists || req.content == "" {
 			content = "kittens"
 			ttl = 1
 		} else {
-			content = uploadPendingMap[queryname].content
-			tmp := uploadPendingMap[queryname]
-			tmp.replications++
-			uploadPendingMap[queryname] = tmp
+			content = req.content
+			req.replications++
+			uploadPendingMap[queryname] = req
 		}
+		uploadPendingMapMutex.Unlock()
 
 		ostring := make([]string, 1)
 		ostring[0] = content
@@ -124,10 +130,12 @@ func uploadChunk(filename string, chunk int, data string) {
 		endpoints = append(endpoints, IP)
 	}
 
+	uploadPendingMapMutex.Lock()
 	uploadPendingMap[queryname] = storageRequest{
 		content:      data,
 		replications: 0,
 	}
+	uploadPendingMapMutex.Unlock()
 
 	var targetEndpoints []string
 	if *mockMode {
@@ -156,19 +164,31 @@ func uploadChunk(filename string, chunk int, data string) {
 		} else {
 			targetAddr = ip + ":53"
 		}
-		addr, _ := net.ResolveUDPAddr("udp", targetAddr)
+		addr, err := net.ResolveUDPAddr("udp", targetAddr)
+		if err != nil {
+			AddLog("WARNING: failed to resolve resolver IP %s: %s", ip, err.Error())
+			continue
+		}
 		globalSender.WriteTo(dnspacket, addr)
 	}
 
 	if !*mockMode {
-		defer delete(uploadPendingMap, queryname)
+		defer func() {
+			uploadPendingMapMutex.Lock()
+			delete(uploadPendingMap, queryname)
+			uploadPendingMapMutex.Unlock()
+		}()
 	}
 
 	tout := 0
 	for {
 		time.Sleep(time.Millisecond * 250)
-		if uploadPendingMap[queryname].replications != 0 {
-			AddLog("Chunk %d (hash: %s) successfully cached (replicated %d times)", chunk, queryname, uploadPendingMap[queryname].replications)
+		uploadPendingMapMutex.RLock()
+		reps := uploadPendingMap[queryname].replications
+		uploadPendingMapMutex.RUnlock()
+
+		if reps != 0 {
+			AddLog("Chunk %d (hash: %s) successfully cached (replicated %d times)", chunk, queryname, reps)
 			return
 		}
 		if tout == 10 {
@@ -181,7 +201,11 @@ func uploadChunk(filename string, chunk int, data string) {
 }
 
 func fetchFromShard(filename string, chunk int) []byte {
-	tempSocket, _ := net.ListenPacket("udp4", "0.0.0.0:0")
+	tempSocket, err := net.ListenPacket("udp4", "0.0.0.0:0")
+	if err != nil {
+		AddLog("ERROR: failed to listen on UDP for fetch: %s", err.Error())
+		return []byte{}
+	}
 	defer tempSocket.Close()
 	endpoints := make([]string, 0)
 	queryname := ""
@@ -220,7 +244,11 @@ func fetchFromShard(filename string, chunk int) []byte {
 		} else {
 			targetAddr = endpoint + ":53"
 		}
-		addr, _ := net.ResolveUDPAddr("udp", targetAddr)
+		addr, err := net.ResolveUDPAddr("udp", targetAddr)
+		if err != nil {
+			AddLog("WARNING: failed to resolve address %s: %s", endpoint, err.Error())
+			continue
+		}
 		tempSocket.WriteTo(dnspacket, addr)
 		dnsraw := make([]byte, 1500)
 		bytecount, _, err := tempSocket.ReadFrom(dnsraw)
