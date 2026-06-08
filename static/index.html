@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNSFS // True Cloud Storage Dashboard</title>
+    <!-- Modern Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="stars-overlay"></div>
+    <div class="cyber-grid"></div>
+
+    <header class="app-header">
+        <div class="logo-area">
+            <span class="cyber-tag">SYS_OP: ONLINE</span>
+            <h1 class="logo-title">DNS<span>FS</span></h1>
+            <p class="logo-subtitle">True Cloud Storage in DNS Resolver Caches</p>
+        </div>
+        <div class="system-status">
+            <div class="status-indicator">
+                <span class="status-dot pulsing-green"></span>
+                <span class="status-text">CORE ONLINE</span>
+            </div>
+            <div class="badge" id="host-addr-badge">127.0.0.1</div>
+            <div class="badge" id="dns-zone-badge">dns.local</div>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <!-- Overview Stats -->
+        <section class="panel stats-panel full-width">
+            <div class="stat-card">
+                <div class="stat-icon cyan-glow">📁</div>
+                <div class="stat-data">
+                    <span class="stat-label">Files Uploaded</span>
+                    <span class="stat-value" id="stat-files-count">0</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon green-glow">🧱</div>
+                <div class="stat-data">
+                    <span class="stat-label">Total Chunks</span>
+                    <span class="stat-value" id="stat-chunks-count">0</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon purple-glow">📡</div>
+                <div class="stat-data">
+                    <span class="stat-label">DNS Resolvers</span>
+                    <span class="stat-value" id="stat-resolvers-count">0</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon orange-glow">⚡</div>
+                <div class="stat-data">
+                    <span class="stat-label">Avg. Latency</span>
+                    <span class="stat-value" id="stat-latency-value">-- ms</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Left Column: Operations -->
+        <div class="dashboard-col">
+            <!-- Upload File Panel -->
+            <section class="panel upload-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title"><span>01 //</span> SHARD & UPLOAD</h2>
+                    <span class="panel-accent"></span>
+                </div>
+                <div class="panel-body">
+                    <div class="drop-zone" id="drop-zone">
+                        <div class="drop-zone-content">
+                            <span class="drop-icon">🚀</span>
+                            <p class="drop-title">Drag & Drop File Here</p>
+                            <p class="drop-subtitle">or click to browse files</p>
+                            <input type="file" id="file-input" class="file-input" hidden>
+                        </div>
+                    </div>
+                    <div class="upload-progress-container hidden" id="progress-container">
+                        <div class="file-details">
+                            <span class="file-name" id="progress-file-name">filename.txt</span>
+                            <span class="file-size" id="progress-file-size">0 KB</span>
+                        </div>
+                        <div class="progress-bar-wrapper">
+                            <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <span id="progress-chunks-sent">0 / 0 Chunks</span>
+                            <span id="progress-percent">0%</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- File Directory Panel -->
+            <section class="panel inventory-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title"><span>02 //</span> FILE RECONSTRUCTOR</h2>
+                    <span class="panel-accent"></span>
+                </div>
+                <div class="panel-body">
+                    <div class="fetch-manual-form">
+                        <input type="text" id="fetch-filename" placeholder="Enter file name to fetch manually..." class="cyber-input">
+                        <button id="btn-fetch-manual" class="cyber-button">Fetch & Reassemble</button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table class="file-table" id="file-table">
+                            <thead>
+                                <tr>
+                                    <th>Filename</th>
+                                    <th>Size</th>
+                                    <th>Chunks</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="file-list-tbody">
+                                <tr class="empty-row">
+                                    <td colspan="4">No files cached in this session yet.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Right Column: Monitoring -->
+        <div class="dashboard-col">
+            <!-- Resolver Matrix Panel -->
+            <section class="panel resolvers-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title"><span>03 //</span> DNS CACHE NODES</h2>
+                    <div class="panel-actions">
+                        <button id="btn-test-resolvers" class="cyber-button-sm">Ping & Validate Cache Nodes</button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div class="resolver-grid" id="resolver-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Live Logger Panel -->
+            <section class="panel log-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title"><span>04 //</span> LIVE TRANSLATION CONSOLE</h2>
+                    <div class="panel-actions">
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="autoscroll-check" checked>
+                            <span class="checkmark"></span> Auto-Scroll
+                        </label>
+                    </div>
+                </div>
+                <div class="panel-body log-console-wrapper">
+                    <div class="log-console" id="log-console">
+                        <div class="log-line system">Console initialized. Ready for operations.</div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <p>DNSFS v1.1.0 // STORE FILES IN OTHERS DNS RESOLVER CACHES</p>
+        <p>Powered by BPF Filters, DNS Recursion & Cache Expiry Hacks</p>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>

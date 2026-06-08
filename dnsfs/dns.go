@@ -33,11 +33,14 @@ func DNSLoop(socket net.PacketConn) {
 	for {
 		dnsin := make([]byte, 1500)
 		inbytes, inaddr, err := socket.ReadFrom(dnsin)
+		if err != nil {
+			continue
+		}
 
 		inmsg := &dns.Msg{}
 
 		if unpackErr := inmsg.Unpack(dnsin[0:inbytes]); unpackErr != nil {
-			log.Printf("Unable to unpack DNS request %s", err.Error())
+			log.Printf("Unable to unpack DNS request: %s", unpackErr.Error())
 			continue
 		}
 
@@ -49,15 +52,17 @@ func DNSLoop(socket net.PacketConn) {
 		iqn := strings.ToLower(inmsg.Question[0].Name)
 
 		if !strings.Contains(iqn, *dnsbase) {
-			log.Printf("question is not for us '%s' vs expected '%s'", iqn, *dnsbase)
 			continue
 		}
+
+		TrackResolverRequest(inaddr.String())
 
 		outmsg := &dns.Msg{}
 
 		queryname := strings.Replace(
 			iqn, fmt.Sprintf(".%s.", *dnsbase), "", 1)
-		log.Printf("Inbound query for chunk '%+v'", queryname)
+		queryname = strings.TrimSuffix(queryname, ".")
+		AddLog("Inbound DNS query for chunk '%s' from resolver %s", queryname, inaddr.String())
 
 		ttl := uint32(2147483646)
 		content := ""
@@ -66,7 +71,6 @@ func DNSLoop(socket net.PacketConn) {
 			ttl = 1
 		} else {
 			content = uploadPendingMap[queryname].content
-			// uploadPendingMap[queryname].storageNotifications <- true
 			tmp := uploadPendingMap[queryname]
 			tmp.replications++
 			uploadPendingMap[queryname] = tmp
@@ -90,7 +94,7 @@ func DNSLoop(socket net.PacketConn) {
 		outputb, err := outmsg.Pack()
 
 		if err != nil {
-			log.Printf("unable to pack response to thing")
+			log.Printf("unable to pack response to thing: %s", err)
 			continue
 		}
 
@@ -120,12 +124,19 @@ func uploadChunk(filename string, chunk int, data string) {
 		endpoints = append(endpoints, IP)
 	}
 
-	// replies := make(chan bool)
 	uploadPendingMap[queryname] = storageRequest{
 		content:      data,
 		replications: 0,
-		// storageNotifications: replies,
 	}
+
+	var targetEndpoints []string
+	if *mockMode {
+		targetEndpoints = []string{"127.0.0.1:" + *dnsport}
+	} else {
+		targetEndpoints = endpoints
+	}
+
+	AddLog("Uploading chunk %d (hash: %s) for file '%s' targeting resolvers: %v", chunk, queryname, filename, targetEndpoints)
 
 	m1 := new(dns.Msg)
 	m1.Id = dns.Id()
@@ -138,21 +149,30 @@ func uploadChunk(filename string, chunk int, data string) {
 	}
 	dnspacket, _ := m1.Pack()
 
-	for _, ip := range endpoints {
-		addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:53", string(ip)))
+	for _, ip := range targetEndpoints {
+		var targetAddr string
+		if strings.Contains(ip, ":") {
+			targetAddr = ip
+		} else {
+			targetAddr = ip + ":53"
+		}
+		addr, _ := net.ResolveUDPAddr("udp", targetAddr)
 		globalSender.WriteTo(dnspacket, addr)
 	}
 
-	defer delete(uploadPendingMap, queryname)
+	if !*mockMode {
+		defer delete(uploadPendingMap, queryname)
+	}
 
 	tout := 0
 	for {
 		time.Sleep(time.Millisecond * 250)
 		if uploadPendingMap[queryname].replications != 0 {
+			AddLog("Chunk %d (hash: %s) successfully cached (replicated %d times)", chunk, queryname, uploadPendingMap[queryname].replications)
 			return
 		}
 		if tout == 10 {
-			fmt.Printf("oops, I don't think chunk %s was stored at all... might have lost data :3\n", queryname)
+			AddLog("WARNING: Chunk %d (hash: %s) storage check timed out! Data may be lost.", chunk, queryname)
 			return
 		}
 
@@ -172,6 +192,15 @@ func fetchFromShard(filename string, chunk int) []byte {
 		endpoints = append(endpoints, IP)
 	}
 
+	var targetEndpoints []string
+	if *mockMode {
+		targetEndpoints = []string{"127.0.0.1:" + *dnsport}
+	} else {
+		targetEndpoints = endpoints
+	}
+
+	AddLog("Fetching chunk %d (hash: %s) for file '%s' from endpoints: %v", chunk, queryname, filename, targetEndpoints)
+
 	m1 := new(dns.Msg)
 	m1.Id = dns.Id()
 	m1.RecursionDesired = true
@@ -183,9 +212,15 @@ func fetchFromShard(filename string, chunk int) []byte {
 	}
 	dnspacket, _ := m1.Pack()
 
-	for _, endpoint := range endpoints {
+	for _, endpoint := range targetEndpoints {
 		tempSocket.SetReadDeadline(time.Now().Add(time.Millisecond * 400))
-		addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:53", string(endpoint)))
+		var targetAddr string
+		if strings.Contains(endpoint, ":") {
+			targetAddr = endpoint
+		} else {
+			targetAddr = endpoint + ":53"
+		}
+		addr, _ := net.ResolveUDPAddr("udp", targetAddr)
 		tempSocket.WriteTo(dnspacket, addr)
 		dnsraw := make([]byte, 1500)
 		bytecount, _, err := tempSocket.ReadFrom(dnsraw)
@@ -224,9 +259,11 @@ func fetchFromShard(filename string, chunk int) []byte {
 			continue
 		}
 
+		AddLog("Successfully retrieved chunk %d from resolver %s", chunk, endpoint)
 		return bytes
 	}
 
+	AddLog("ERROR: Failed to retrieve chunk %d (hash: %s) from all resolvers!", chunk, queryname)
 	return []byte{}
 }
 
